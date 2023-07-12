@@ -10,7 +10,7 @@ PRECISION     = 5
 LIVE_DISPLAY  = False
 
 def print_usage():
-    print('python3 rapl-reader.py [--live] [--output=' + OUTPUT_FILE + '] [--delay=' + DELAY_S + '] [--precision=' + PRECISION + ']')
+    print('python3 rapl-reader.py [--live] [--output=' + OUTPUT_FILE + '] [--delay=' + str(DELAY_S) + '] [--precision=' + str(PRECISION) + ']')
 
 ###########################################
 # Find relevant sysfs
@@ -94,7 +94,7 @@ def loop_read(sysfs : dict):
 if __name__ == '__main__':
 
     short_options = 'hld:o:p:'
-    long_options = ['help', 'live', 'delay=5', 'output=', 'precision=']
+    long_options = ['help', 'live', 'delay=', 'output=', 'precision=']
 
     try:
         arguments, values = getopt.getopt(sys.argv[1:], short_options, long_options)
