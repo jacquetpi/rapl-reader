@@ -6,9 +6,10 @@ OUTPUT_HEADER = 'timestamp,domain,measure'
 OUTPUT_NL     = '\n'
 DELAY_S       = 5
 ROOT_FS       ='/sys/class/powercap/'
+LIVE_DISPLAY  = False
 
 def print_usage():
-    print('python3 rapl-reader.py [--output=' + OUTPUT_FILE + '] [--delay=' + DELAY_S + ']')
+    print('python3 rapl-reader.py [--live] [--output=' + OUTPUT_FILE + '] [--delay=' + DELAY_S + ']')
 
 ###########################################
 # Find relevant sysfs
@@ -20,7 +21,10 @@ def find_sysfs():
     sysfs = dict()
     for folder in folders:
         base = ROOT_FS + folder
-        with open(base + '/name') as f: sysfs[str(f.read().replace('\n',''))] = base + '/energy_uj'
+        with open(base + '/name') as f: 
+            domain = f.read().replace('\n','')
+        if '-' not in domain: domain+= '-' + folder.split(':')[1] # We guarantee name unicity
+        sysfs[domain] = base + '/energy_uj'
     return sysfs
 
 ###########################################
@@ -34,10 +38,15 @@ def read_rapl(sysfs : dict, hist : dict, current_time : int, time_since_launch :
     # Track time for next round
     hist['time'] = current_time
 
-    # Dump reading
-    with open(OUTPUT_FILE, 'a') as f:
-        for domain, measure in measures.items():
-            f.write(str(time_since_launch) + ',' + domain + ',' + str(measure) + OUTPUT_NL)
+    
+    if measures:
+        measures['package-total'] = sum([measures[domain] if 'package-' in domain else 0 for domain in measures.keys()])
+        if LIVE_DISPLAY: print(measures)
+
+        # Dump reading
+        with open(OUTPUT_FILE, 'a') as f:
+            for domain, measure in measures.items():
+                f.write(str(time_since_launch) + ',' + domain + ',' + str(measure) + OUTPUT_NL)
 
 def read_joule_file(domain : str, file : str, hist : dict, current_time : int):
     # Read file
@@ -78,8 +87,8 @@ def loop_read(sysfs : dict):
 ###########################################
 if __name__ == '__main__':
 
-    short_options = 'hd:o:'
-    long_options = ['help', 'delay=5', 'output=']
+    short_options = 'hld:o:'
+    long_options = ['help', 'live', 'delay=5', 'output=']
 
     try:
         arguments, values = getopt.getopt(sys.argv[1:], short_options, long_options)
@@ -89,6 +98,8 @@ if __name__ == '__main__':
     for current_argument, current_value in arguments:
         if current_argument in ('-h', '--help'):
             print_usage()
+        elif current_argument in('-l', '--live'):
+            LIVE_DISPLAY= True
         elif current_argument in('-o', '--output'):
             OUTPUT_FILE= current_value
         elif current_argument in('-d', '--delay'):
