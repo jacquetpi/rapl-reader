@@ -6,10 +6,11 @@ OUTPUT_HEADER = 'timestamp,domain,measure'
 OUTPUT_NL     = '\n'
 DELAY_S       = 5
 ROOT_FS       ='/sys/class/powercap/'
+PRECISION     = 5
 LIVE_DISPLAY  = False
 
 def print_usage():
-    print('python3 rapl-reader.py [--live] [--output=' + OUTPUT_FILE + '] [--delay=' + DELAY_S + ']')
+    print('python3 rapl-reader.py [--live] [--output=' + OUTPUT_FILE + '] [--delay=' + DELAY_S + '] [--precision=' + PRECISION + ']')
 
 ###########################################
 # Find relevant sysfs
@@ -33,16 +34,19 @@ def find_sysfs():
 def read_rapl(sysfs : dict, hist : dict, current_time : int, time_since_launch : int):
     measures = dict()
     overflow = False
+    package_total = 0
     for domain, file in sysfs.items():
         watt = read_joule_file(domain=domain, file=file, hist=hist, current_time=current_time)
-        if watt !=None: measures[domain] = watt
+        if watt !=None: 
+            measures[domain] = round(watt,PRECISION)
+            if 'package-' in domain: package_total+=watt
         else: overflow=True
+
     # Track time for next round
     hist['time'] = current_time
 
-    
     if measures:
-        if not overflow: measures['package-total'] = sum([measures[domain] if 'package-' in domain else 0 for domain in measures.keys()])
+        if not overflow: measures['package-total'] = round(package_total,PRECISION)
         if LIVE_DISPLAY: print(measures)
 
         # Dump reading
@@ -66,7 +70,7 @@ def read_joule_file(domain : str, file : str, hist : dict, current_time : int):
     current_us_delta = (current_time - hist['time'])/1000 #delta with ns to us
     current_watt = current_uj_delta/current_us_delta
     
-    return round(current_watt,5)
+    return current_watt
 
 ###########################################
 # Main loop, read periodically
@@ -89,8 +93,8 @@ def loop_read(sysfs : dict):
 ###########################################
 if __name__ == '__main__':
 
-    short_options = 'hld:o:'
-    long_options = ['help', 'live', 'delay=5', 'output=']
+    short_options = 'hld:o:p:'
+    long_options = ['help', 'live', 'delay=5', 'output=', 'precision=']
 
     try:
         arguments, values = getopt.getopt(sys.argv[1:], short_options, long_options)
@@ -104,6 +108,8 @@ if __name__ == '__main__':
             LIVE_DISPLAY= True
         elif current_argument in('-o', '--output'):
             OUTPUT_FILE= current_value
+        elif current_argument in('-p', '--precision'):
+            PRECISION= int(current_value)
         elif current_argument in('-d', '--delay'):
             DELAY_S= int(current_value)
     
