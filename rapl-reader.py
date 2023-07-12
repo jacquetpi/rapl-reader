@@ -32,15 +32,17 @@ def find_sysfs():
 ###########################################
 def read_rapl(sysfs : dict, hist : dict, current_time : int, time_since_launch : int):
     measures = dict()
+    overflow = False
     for domain, file in sysfs.items():
         watt = read_joule_file(domain=domain, file=file, hist=hist, current_time=current_time)
         if watt !=None: measures[domain] = watt
+        else: overflow=True
     # Track time for next round
     hist['time'] = current_time
 
     
     if measures:
-        measures['package-total'] = sum([measures[domain] if 'package-' in domain else 0 for domain in measures.keys()])
+        if not overflow: measures['package-total'] = sum([measures[domain] if 'package-' in domain else 0 for domain in measures.keys()])
         if LIVE_DISPLAY: print(measures)
 
         # Dump reading
