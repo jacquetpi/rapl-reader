@@ -14,10 +14,11 @@ SYSFS_TOPO    = '/sys/devices/system/cpu/'
 SYSFS_STATS_KEYS  = {'cpuid':0, 'user':1, 'nice':2 , 'system':3, 'idle':4, 'iowait':5, 'irq':6, 'softirq':7, 'steal':8, 'guest':9, 'guest_nice':10}
 SYSFS_STATS_IDLE  = ['idle', 'iowait']
 SYSFS_STATS_NTID  = ['user', 'nice', 'system', 'irq', 'softirq', 'steal']
-LIVE_DISPLAY  = False
+LIVE_DISPLAY = False
+VM_CONNECTOR = None
 
 def print_usage():
-    print('python3 rapl-reader.py [--live] [--output=' + OUTPUT_FILE + '] [--delay=' + str(DELAY_S) + ' (in sec)] [--precision=' + str(PRECISION) + ' (number of decimal)]')
+    print('python3 rapl-reader.py [--help] [--live] [--vm=qemu:///system] [--output=' + OUTPUT_FILE + '] [--delay=' + str(DELAY_S) + ' (in sec)] [--precision=' + str(PRECISION) + ' (number of decimal)]')
 
 ###########################################
 # Find relevant sysfs
@@ -121,6 +122,24 @@ def __get_usage_of_line(split : list, hist_object : object):
     return cpu_usage
 
 ###########################################
+# Read libvirt
+###########################################
+
+def read_libvirt():
+    count = 0
+    cpu_cumul = 0
+    mem_cumul = 0
+    for domain_id in VM_CONNECTOR.listDomainsID():
+        try:
+            virDomain = VM_CONNECTOR.lookupByID(domain_id)
+            cpu_cumul+=virDomain.maxVcpus()
+            mem_cumul+=int(virDomain.maxMemory()/1024)
+            count+=1
+        except libvirt.libvirtError as ex:  # VM is not alived anymore
+            pass
+    return {'libvirt_vm_count': count, 'libvirt_vm_cpu_cml': cpu_cumul, 'libvirt_vm_mem_cml': mem_cumul}
+
+###########################################
 # Read joule file, convert to watt
 ###########################################
 def read_rapl(rapl_sysfs : dict, hist : dict, current_time : int):
@@ -172,13 +191,17 @@ def loop_read(rapl_sysfs : dict, cpuid_per_numa : dict):
 
         rapl_measures = read_rapl(rapl_sysfs=rapl_sysfs, hist=rapl_hist, current_time=time_begin)
         cpu_measures  = read_cpu_usage(cpuid_per_numa=cpuid_per_numa, hist=cpu_hist)
-        output(rapl_measures=rapl_measures, cpu_measures=cpu_measures, time_since_launch=int((time_begin-launch_at)/(10**9)))
+        libvirt_measures = dict()
+        if VM_CONNECTOR != None: libvirt_measures = read_libvirt()
+
+        output(rapl_measures=rapl_measures, cpu_measures=cpu_measures, libvirt_measures=libvirt_measures, time_since_launch=int((time_begin-launch_at)/(10**9)))
 
         time_to_sleep = (DELAY_S*10**9) - (time.time_ns() - time_begin)
         if time_to_sleep>0: time.sleep(time_to_sleep/10**9)
         else: print('Warning: overlap iteration', -(time_to_sleep/10**9), 's')
 
-def output(rapl_measures : dict, cpu_measures : dict, time_since_launch : int):
+def output(rapl_measures : dict, cpu_measures : dict, libvirt_measures : dict, time_since_launch : int):
+
     if LIVE_DISPLAY and rapl_measures:
         max_domain_length = len(max(list(rapl_measures.keys()), key=len))
         max_measure_length = len(max([str(value) for value in rapl_measures.values()], key=len))
@@ -189,6 +212,7 @@ def output(rapl_measures : dict, cpu_measures : dict, time_since_launch : int):
                     usage_complement+= '- ' + str(cpu_usage) + '%'
                     break
             print(domain.ljust(max_domain_length), str(measure).ljust(max_measure_length), 'W', usage_complement)
+        if libvirt_measures: print('Libvirt:', libvirt_measures['libvirt_vm_count'], 'vm(s)', libvirt_measures['libvirt_vm_cpu_cml'], 'cpu(s)', libvirt_measures['libvirt_vm_mem_cml'], 'MB')
         print('---')
 
     # Dump reading
@@ -197,14 +221,16 @@ def output(rapl_measures : dict, cpu_measures : dict, time_since_launch : int):
             f.write(str(time_since_launch) + ',' + domain + ',' + str(measure) + OUTPUT_NL)
         for cpuid, measure in cpu_measures.items():
             f.write(str(time_since_launch) + ',' + cpuid + ',' + str(measure) + OUTPUT_NL)
+        for metric, value in libvirt_measures.items():
+            f.write(str(time_since_launch) + ',' + metric + ',' + str(value) + OUTPUT_NL)
 
 ###########################################
 # Entrypoint, manage arguments
 ###########################################
 if __name__ == '__main__':
 
-    short_options = 'hld:o:p:'
-    long_options = ['help', 'live', 'delay=', 'output=', 'precision=']
+    short_options = 'hldv:o:p:'
+    long_options = ['help', 'live', 'vm=', 'delay=', 'output=', 'precision=']
 
     try:
         arguments, values = getopt.getopt(sys.argv[1:], short_options, long_options)
@@ -217,6 +243,10 @@ if __name__ == '__main__':
             sys.exit(0)
         elif current_argument in('-l', '--live'):
             LIVE_DISPLAY= True
+        elif current_argument in('-v', '--vm'):
+            import libvirt 
+            VM_CONNECTOR = libvirt.open(current_value)
+            if not VM_CONNECTOR: raise SystemExit('Failed to open connection to ' + current_value)
         elif current_argument in('-o', '--output'):
             OUTPUT_FILE= current_value
         elif current_argument in('-p', '--precision'):
