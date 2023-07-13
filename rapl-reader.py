@@ -17,7 +17,7 @@ SYSFS_STATS_NTID  = ['user', 'nice', 'system', 'irq', 'softirq', 'steal']
 LIVE_DISPLAY  = False
 
 def print_usage():
-    print('python3 rapl-reader.py [--live] [--output=' + OUTPUT_FILE + '] [--delay=' + str(DELAY_S) + '] [--precision=' + str(PRECISION) + ']')
+    print('python3 rapl-reader.py [--live] [--output=' + OUTPUT_FILE + '] [--delay=' + str(DELAY_S) + ' (in sec)] [--precision=' + str(PRECISION) + ' (number of decimal)]')
 
 ###########################################
 # Find relevant sysfs
@@ -214,6 +214,7 @@ if __name__ == '__main__':
     for current_argument, current_value in arguments:
         if current_argument in ('-h', '--help'):
             print_usage()
+            sys.exit(0)
         elif current_argument in('-l', '--live'):
             LIVE_DISPLAY= True
         elif current_argument in('-o', '--output'):
