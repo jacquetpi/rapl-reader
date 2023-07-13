@@ -29,7 +29,7 @@ def find_rapl_sysfs():
     sysfs = dict()
     for folder in folders:
         base = ROOT_FS + folder
-        with open(base + '/name') as f: 
+        with open(base + '/name') as f:
             domain = f.read().replace('\n','')
         if '-' not in domain: domain+= '-' + folder.split(':')[1] # We guarantee name unicity
         sysfs[domain] = base + '/energy_uj'
@@ -52,10 +52,10 @@ def find_cpuid_per_numa():
 def read_cpu_usage(cpuid_per_numa : dict, hist :dict):
     measures = dict()
     global_usage = get_usage_global(cputime_hist=hist)
-    if global_usage != None: measures['cpu%_package-global'] = global_usage
+    if global_usage != None: measures['cpu%_package-global'] = round(global_usage, PRECISION)
     for numa_id, cpuid_list in cpuid_per_numa.items():
         numa_usage = get_usage_of(server_cpu_list=cpuid_list, cputime_hist=hist)
-        if numa_usage != None: measures['cpu%_package-' + str(numa_id)] = global_usage
+        if numa_usage != None: measures['cpu%_package-' + str(numa_id)] = numa_usage
     return measures
 
 class CpuTime(object):
@@ -100,6 +100,8 @@ def get_usage_of(server_cpu_list : list, cputime_hist : dict):
             cumulated_cpu_usage+=cpu_usage
         else: cumulated_cpu_usage = None # Do not break to compute others initializing values
 
+    if cumulated_cpu_usage != None: 
+        cumulated_cpu_usage = round(cumulated_cpu_usage/len(server_cpu_list), PRECISION)
     return cumulated_cpu_usage
 
 def __get_usage_of_line(split : list, hist_object : object):
@@ -113,7 +115,8 @@ def __get_usage_of_line(split : list, hist_object : object):
         delta_idle     = idle - prev_idle
         delta_total    = (idle + not_idle) - (prev_idle + prev_not_idle)
         if delta_total>0: # Manage overflow
-            cpu_usage = round(((delta_total-delta_idle)/delta_total)*100,PRECISION)
+            cpu_usage = ((delta_total-delta_idle)/delta_total)*100
+    
     hist_object.set_time(idle=idle, not_idle=not_idle)
     return cpu_usage
 
