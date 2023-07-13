@@ -4,12 +4,12 @@ Easily measure the power consumption of a linux system
 
 ## Features
 
-Automatically discover all RAPL domains on a linux system
-All RAPL measures are converted to Watts
-Monitor global CPU usage jointly with package consumption
-Monitor per-socket CPU usage jointly with their consumtion (useful on a multi-socket system)
-Measures are formatted on a ready to use CSV (under normalised timestamp keys)
-Live display is also possible with ```--live``` option
+Automatically discover all RAPL domains on a linux system\
+All RAPL measures are converted to Watts\
+Monitor global CPU usage jointly with package consumption\
+Monitor per-socket CPU usage jointly with their consumtion (useful on a multi-socket system)\
+Measures are formatted on a ready to use CSV (under normalised timestamp keys)\
+Live display is also possible with ```--live``` option\
 
 ## Usage
 
