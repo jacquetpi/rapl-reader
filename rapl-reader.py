@@ -94,7 +94,7 @@ def get_usage_of(server_cpu_list : list, cputime_hist : dict):
         hist_object = cputime_hist[split[SYSFS_STATS_KEYS['cpuid']]]
 
         cpu_usage = __get_usage_of_line(split=split, hist_object=hist_object)
-    
+
         # Add usage to cumulated value
         if cumulated_cpu_usage != None and cpu_usage != None:
             cumulated_cpu_usage+=cpu_usage
@@ -126,7 +126,7 @@ def read_rapl(rapl_sysfs : dict, hist : dict, current_time : int):
     package_global = 0
     for domain, file in rapl_sysfs.items():
         watt = read_joule_file(domain=domain, file=file, hist=hist, current_time=current_time)
-        if watt !=None: 
+        if watt !=None:
             measures[domain] = round(watt,PRECISION)
             if 'package-' in domain: package_global+=watt
         else: overflow=True
@@ -153,7 +153,7 @@ def read_joule_file(domain : str, file : str, hist : dict, current_time : int):
     # Convert to watt
     current_us_delta = (current_time - hist['time'])/1000 #delta with ns to us
     current_watt = current_uj_delta/current_us_delta
-    
+
     return current_watt
 
 ###########################################
@@ -166,7 +166,7 @@ def loop_read(rapl_sysfs : dict, cpuid_per_numa : dict):
     launch_at = time.time_ns()
     while True:
         time_begin = time.time_ns()
-        
+
         rapl_measures = read_rapl(rapl_sysfs=rapl_sysfs, hist=rapl_hist, current_time=time_begin)
         cpu_measures  = read_cpu_usage(cpuid_per_numa=cpuid_per_numa, hist=cpu_hist)
         output(rapl_measures=rapl_measures, cpu_measures=cpu_measures, time_since_launch=int((time_begin-launch_at)/(10**9)))
@@ -176,14 +176,17 @@ def loop_read(rapl_sysfs : dict, cpuid_per_numa : dict):
         else: print('Warning: overlap iteration', -(time_to_sleep/10**9), 's')
 
 def output(rapl_measures : dict, cpu_measures : dict, time_since_launch : int):
-    if LIVE_DISPLAY and rapl_measures: 
+    if LIVE_DISPLAY and rapl_measures:
+        max_domain_length = len(max(list(rapl_measures.keys()), key=len))
+        max_measure_length = len(max([str(value) for value in rapl_measures.values()], key=len))
         for domain, measure in rapl_measures.items():
             usage_complement = ''
             for package, cpu_usage in cpu_measures.items():
                 if domain in package:
                     usage_complement+= '- ' + str(cpu_usage) + '%'
                     break
-            print(domain, measure, usage_complement)
+            print(domain.ljust(max_domain_length), str(measure).ljust(max_measure_length), 'W', usage_complement)
+        print('---')
 
     # Dump reading
     with open(OUTPUT_FILE, 'a') as f:
@@ -216,17 +219,17 @@ if __name__ == '__main__':
             PRECISION= int(current_value)
         elif current_argument in('-d', '--delay'):
             DELAY_S= float(current_value)
-    
+
     try:
         # Find sysfs
         rapl_sysfs=find_rapl_sysfs()
         cpuid_per_numa=find_cpuid_per_numa()
-        print('RAPL domain found:')
-        for domain, location in rapl_sysfs.items(): print(domain, location)
-        print('NUMA topology found:')
-        for numa_id, cpu_list in cpuid_per_numa.items(): 
-            cpu_list.sort()
-            print(numa_id, cpu_list)
+        print('>RAPL domain found:')
+        max_domain_length = len(max(list(rapl_sysfs.keys()), key=len))
+        for domain, location in rapl_sysfs.items(): print(domain.ljust(max_domain_length), location)
+        print('>NUMA topology found:')
+        for numa_id, cpu_list in cpuid_per_numa.items(): print('socket-' + str(numa_id) + ':', len(cpu_list), 'cores')
+        print('')
         # Init output
         with open(OUTPUT_FILE, 'w') as f: f.write(OUTPUT_HEADER + OUTPUT_NL)
         # Launch
