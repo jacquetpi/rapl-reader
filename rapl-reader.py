@@ -15,10 +15,11 @@ SYSFS_STATS_KEYS  = {'cpuid':0, 'user':1, 'nice':2 , 'system':3, 'idle':4, 'iowa
 SYSFS_STATS_IDLE  = ['idle', 'iowait']
 SYSFS_STATS_NTID  = ['user', 'nice', 'system', 'irq', 'softirq', 'steal']
 LIVE_DISPLAY = False
+EXPLICIT_USAGE = None
 VM_CONNECTOR = None
 
 def print_usage():
-    print('python3 rapl-reader.py [--help] [--live] [--vm=qemu:///system] [--output=' + OUTPUT_FILE + '] [--delay=' + str(DELAY_S) + ' (in sec)] [--precision=' + str(PRECISION) + ' (number of decimal)]')
+    print('python3 rapl-reader.py [--help] [--live]  [--explicit] [--vm=qemu:///system] [--output=' + OUTPUT_FILE + '] [--delay=' + str(DELAY_S) + ' (in sec)] [--precision=' + str(PRECISION) + ' (number of decimal)]')
 
 ###########################################
 # Find relevant sysfs
@@ -105,7 +106,7 @@ def get_usage_of(server_cpu_list : list, cputime_hist : dict):
         cumulated_cpu_usage = round(cumulated_cpu_usage/len(server_cpu_list), PRECISION)
     return cumulated_cpu_usage
 
-def __get_usage_of_line(split : list, hist_object : object):
+def __get_usage_of_line(split : list, hist_object : object, update_history : bool = True):
     idle          = sum([ int(split[SYSFS_STATS_KEYS[idle_key]])     for idle_key     in SYSFS_STATS_IDLE])
     not_idle      = sum([ int(split[SYSFS_STATS_KEYS[not_idle_key]]) for not_idle_key in SYSFS_STATS_NTID])
 
@@ -118,8 +119,24 @@ def __get_usage_of_line(split : list, hist_object : object):
         if delta_total>0: # Manage overflow
             cpu_usage = ((delta_total-delta_idle)/delta_total)*100
     
-    hist_object.set_time(idle=idle, not_idle=not_idle)
+    if update_history: hist_object.set_time(idle=idle, not_idle=not_idle)
     return cpu_usage
+
+def read_core_usage(cputime_hist : dict, update_history : bool):
+    with open(SYSFS_STAT, 'r') as f:
+        lines = f.readlines()
+
+    measures = dict()
+    lines.pop(0) # remove global line, we focus on per cpu usage
+    for line in lines:
+        split = line.split(' ')
+        if not split[SYSFS_STATS_KEYS['cpuid']].startswith('cpu'): break
+
+        if split[SYSFS_STATS_KEYS['cpuid']] not in cputime_hist: cputime_hist[split[SYSFS_STATS_KEYS['cpuid']]] = CpuTime()
+        cpu_usage = __get_usage_of_line(split=split, hist_object=cputime_hist[split[SYSFS_STATS_KEYS['cpuid']]], update_history=update_history)
+        measures['cpu%_' + split[SYSFS_STATS_KEYS['cpuid']]] = cpu_usage
+
+    return measures
 
 ###########################################
 # Read libvirt
@@ -190,7 +207,10 @@ def loop_read(rapl_sysfs : dict, cpuid_per_numa : dict):
         time_begin = time.time_ns()
 
         rapl_measures = read_rapl(rapl_sysfs=rapl_sysfs, hist=rapl_hist, current_time=time_begin)
-        cpu_measures  = read_cpu_usage(cpuid_per_numa=cpuid_per_numa, hist=cpu_hist)
+        cpu_measures  = dict()
+        if EXPLICIT_USAGE: 
+            for key, value in read_core_usage(cputime_hist=cpu_hist, update_history=False).items(): cpu_measures[key] = value
+        for key, value in read_cpu_usage(cpuid_per_numa=cpuid_per_numa, hist=cpu_hist).items(): cpu_measures[key] = value
         libvirt_measures = dict()
         if VM_CONNECTOR != None: libvirt_measures = read_libvirt()
 
@@ -213,6 +233,11 @@ def output(rapl_measures : dict, cpu_measures : dict, libvirt_measures : dict, t
                     break
             print(domain.ljust(max_domain_length), str(measure).ljust(max_measure_length), 'W', usage_complement)
         if libvirt_measures: print('Libvirt:', libvirt_measures['libvirt_vm_count'], 'vm(s)', libvirt_measures['libvirt_vm_cpu_cml'], 'cpu(s)', libvirt_measures['libvirt_vm_mem_cml'], 'MB')
+        if EXPLICIT_USAGE:
+            print('Explicit mode: Display CPU cores exceeding 10%:')
+            for cpuid, value in cpu_measures.items():
+                if 'package' in cpuid: continue
+                if value>=10: print(cpuid, value)
         print('---')
 
     # Dump reading
@@ -229,8 +254,8 @@ def output(rapl_measures : dict, cpu_measures : dict, libvirt_measures : dict, t
 ###########################################
 if __name__ == '__main__':
 
-    short_options = 'hldv:o:p:'
-    long_options = ['help', 'live', 'vm=', 'delay=', 'output=', 'precision=']
+    short_options = 'hledv:o:p:'
+    long_options = ['help', 'live', 'explicit', 'vm=', 'delay=', 'output=', 'precision=']
 
     try:
         arguments, values = getopt.getopt(sys.argv[1:], short_options, long_options)
@@ -243,6 +268,8 @@ if __name__ == '__main__':
             sys.exit(0)
         elif current_argument in('-l', '--live'):
             LIVE_DISPLAY= True
+        elif current_argument in('-e', '--explicit'):
+            EXPLICIT_USAGE = True
         elif current_argument in('-v', '--vm'):
             import libvirt 
             VM_CONNECTOR = libvirt.open(current_value)
