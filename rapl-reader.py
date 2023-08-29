@@ -61,7 +61,7 @@ def read_cpu_usage(cpuid_per_numa : dict, hist :dict):
         numa_freq  = get_freq_of(server_cpu_list=cpuid_list)
         if numa_usage != None: 
             measures['cpu%_package-' + str(numa_id)] = numa_usage
-            measures['freq_package-' + str(numa_id)] = numa_usage
+            measures['freq_package-' + str(numa_id)] = numa_freq
     return measures
 
 class CpuTime(object):
