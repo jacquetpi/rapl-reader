@@ -10,6 +10,7 @@ ROOT_FS       ='/sys/class/powercap/'
 PRECISION     = 5
 SYSFS_STAT    = '/proc/stat'
 SYSFS_TOPO    = '/sys/devices/system/cpu/'
+SYSFS_FREQ    = '/sys/devices/system/cpu/{core}/cpufreq/scaling_cur_freq'
 # From https://www.kernel.org/doc/Documentation/filesystems/proc.txt
 SYSFS_STATS_KEYS  = {'cpuid':0, 'user':1, 'nice':2 , 'system':3, 'idle':4, 'iowait':5, 'irq':6, 'softirq':7, 'steal':8, 'guest':9, 'guest_nice':10}
 SYSFS_STATS_IDLE  = ['idle', 'iowait']
@@ -57,7 +58,10 @@ def read_cpu_usage(cpuid_per_numa : dict, hist :dict):
     if global_usage != None: measures['cpu%_package-global'] = round(global_usage, PRECISION)
     for numa_id, cpuid_list in cpuid_per_numa.items():
         numa_usage = get_usage_of(server_cpu_list=cpuid_list, cputime_hist=hist)
-        if numa_usage != None: measures['cpu%_package-' + str(numa_id)] = numa_usage
+        numa_freq  = get_freq_of(server_cpu_list=cpuid_list)
+        if numa_usage != None: 
+            measures['cpu%_package-' + str(numa_id)] = numa_usage
+            measures['freq_package-' + str(numa_id)] = numa_usage
     return measures
 
 class CpuTime(object):
@@ -137,6 +141,13 @@ def read_core_usage(cputime_hist : dict, update_history : bool):
         measures['cpu%_' + split[SYSFS_STATS_KEYS['cpuid']]] = cpu_usage
 
     return measures
+
+def get_freq_of(server_cpu_list : list):
+    cumulated_cpu_freq = 0
+    for cpu in server_cpu_list:
+        with open(SYSFS_FREQ.replace('{core}', str(cpu)), 'r') as f:
+            cumulated_cpu_freq+= int(f.read())
+    return round(cumulated_cpu_freq/len(server_cpu_list), PRECISION)
 
 ###########################################
 # Read libvirt
