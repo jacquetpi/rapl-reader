@@ -45,7 +45,7 @@ def find_cpuid_per_numa():
     for cpu in cpu_found:
         path = SYSFS_TOPO + 'cpu' + str(cpu) + '/topology/physical_package_id'
         if not exists(path): continue
-        with open('path', 'r') as f:
+        with open(path, 'r') as f:
             numa_id = int(f.read())
         if numa_id not in cpu_per_numa: cpu_per_numa[numa_id] = list()
         cpu_per_numa[numa_id].append('cpu' + str(cpu))
