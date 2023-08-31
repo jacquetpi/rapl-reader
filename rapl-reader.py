@@ -1,6 +1,6 @@
 import sys, getopt, re, time
 from os import listdir
-from os.path import isfile, join
+from os.path import isfile, join, exists
 
 OUTPUT_FILE   = 'consumption.csv'
 OUTPUT_HEADER = 'timestamp,domain,measure'
@@ -43,7 +43,9 @@ def find_cpuid_per_numa():
     cpu_found = [int(re.sub("[^0-9]", '', f)) for f in listdir(SYSFS_TOPO) if not isfile(join('topology', f)) and re.match(regex, f)]
     cpu_per_numa = dict()
     for cpu in cpu_found:
-        with open(SYSFS_TOPO + 'cpu' + str(cpu) + '/topology/physical_package_id', 'r') as f:
+        path = SYSFS_TOPO + 'cpu' + str(cpu) + '/topology/physical_package_id'
+        if not exists(path): continue
+        with open('path', 'r') as f:
             numa_id = int(f.read())
         if numa_id not in cpu_per_numa: cpu_per_numa[numa_id] = list()
         cpu_per_numa[numa_id].append('cpu' + str(cpu))
