@@ -16,8 +16,9 @@ SYSFS_STATS_KEYS  = {'cpuid':0, 'user':1, 'nice':2 , 'system':3, 'idle':4, 'iowa
 SYSFS_STATS_IDLE  = ['idle', 'iowait']
 SYSFS_STATS_NTID  = ['user', 'nice', 'system', 'irq', 'softirq', 'steal']
 LIVE_DISPLAY = False
-EXPLICIT_USAGE = None
-VM_CONNECTOR = None
+EXPLICIT_USAGE  = None
+PER_CACHE_USAGE = None
+VM_CONNECTOR    = None
 
 def print_usage():
     print('python3 rapl-reader.py [--help] [--live]  [--explicit] [--vm=qemu:///system] [--output=' + OUTPUT_FILE + '] [--delay=' + str(DELAY_S) + ' (in sec)] [--precision=' + str(PRECISION) + ' (number of decimal)]')
@@ -50,6 +51,47 @@ def find_cpuid_per_numa():
         if numa_id not in cpu_per_numa: cpu_per_numa[numa_id] = list()
         cpu_per_numa[numa_id].append('cpu' + str(cpu))
     return cpu_per_numa
+
+def find_cache_topo():
+    regex_cpu = '^cpu[0-9]+$'
+    regex_idx = '^index[0-9]+$'
+    cpu_found = [int(re.sub("[^0-9]", '', f)) for f in listdir(SYSFS_TOPO) if re.match(regex_cpu, f)]
+    cpu_per_cache = dict()
+    cpu_found.sort()
+    for cpu in cpu_found:
+        path = SYSFS_TOPO + 'cpu' + str(cpu) + '/cache'
+        cache_found = [int(re.sub("[^0-9]", '', f)) for f in listdir(path) if not isfile(f) and re.match(regex_idx, f)]
+        cache_found.sort()
+        prev_shared = None
+        cache_list_for_cpu = dict()
+        for cache_index in cache_found:
+            path_completed = path + '/' + 'index' + str(cache_index)
+            with open(path_completed + '/shared_cpu_list', 'r') as f:
+                shared = f.read()
+                if shared == prev_shared:
+                    continue
+            with open(path_completed + '/id', 'r') as f:
+                cache_id = int(f.read())
+            cache_list_for_cpu[cache_index] = cache_id
+            prev_shared = shared
+            
+        cache_index_of_interest = list(cache_list_for_cpu.keys())
+        cache_index_of_interest.sort(reverse=True)
+        prev_elem = cpu_per_cache
+
+        for cache_index_unique in cache_index_of_interest:
+            key = 'L' + str(cache_index_unique) + '-' + str(cache_list_for_cpu[cache_index_unique])
+            if cache_index_unique != min(cache_index_of_interest):
+                if key not in prev_elem:
+                    prev_elem[key] = dict()
+                prev_elem = prev_elem[key]
+            else:
+                if key not in prev_elem:
+                    prev_elem[key] = list()
+                prev_elem[key].append(cpu)
+                break
+
+    return cpu_per_cache
 
 ###########################################
 # Read CPU usage
@@ -144,6 +186,42 @@ def read_core_usage(cputime_hist : dict, update_history : bool):
 
     return measures
 
+def display_cache_usage(cache_topo : dict, cputime_hist : dict):
+    core_usage = read_core_usage(cputime_hist=cputime_hist, update_history=False)
+    associate_usage_to_cache_levels(core_usage=core_usage, cache_topo=cache_topo)
+    print('###')
+
+def associate_usage_to_cache_levels(core_usage : dict, cache_topo, label = None, padding_length = -2):
+    if isinstance(cache_topo, dict):
+        cpu_list = list()
+        for cache_id in cache_topo.keys():
+            
+            child_label = ""
+            if label is not None: child_label = label + '_'
+            child_label += cache_id
+            
+            cpu_list.extend(associate_usage_to_cache_levels(core_usage=core_usage, cache_topo=cache_topo[cache_id], label=child_label, padding_length=padding_length+2))
+
+        if label is not None:
+            values = [core_usage['cpu%_cpu' + str(cpu)] for cpu in cpu_list]
+            if None not in values:
+                usage = sum(values) / len(cpu_list)
+                line = ' ' * padding_length
+                line += label + ' : ' + str(usage)
+                print(line)
+        return cpu_list
+
+    else:
+
+        if label is not None:
+            values = [core_usage['cpu%_cpu' + str(cpu)] for cpu in cache_topo]
+            if None not in values:
+                usage = sum(values) / len(cache_topo)
+                line = ' ' * padding_length
+                line += label + ' : ' + str(usage)
+                if usage>51: print(line)
+        return cache_topo
+
 def get_freq_of(server_cpu_list : list):
     cumulated_cpu_freq = 0
     for cpu in server_cpu_list:
@@ -211,7 +289,7 @@ def read_joule_file(domain : str, file : str, hist : dict, current_time : int):
 ###########################################
 # Main loop, read periodically
 ###########################################
-def loop_read(rapl_sysfs : dict, cpuid_per_numa : dict):
+def loop_read(rapl_sysfs : dict, cpuid_per_numa : dict, cache_topo : dict):
     rapl_hist = {name:None for name in rapl_sysfs.keys()}
     rapl_hist['time'] = None # for joule to watt conversion
     cpu_hist = dict()
@@ -221,8 +299,11 @@ def loop_read(rapl_sysfs : dict, cpuid_per_numa : dict):
 
         rapl_measures = read_rapl(rapl_sysfs=rapl_sysfs, hist=rapl_hist, current_time=time_begin)
         cpu_measures  = dict()
-        if EXPLICIT_USAGE: 
+        if EXPLICIT_USAGE:
             for key, value in read_core_usage(cputime_hist=cpu_hist, update_history=False).items(): cpu_measures[key] = value
+        if PER_CACHE_USAGE:
+            display_cache_usage(cputime_hist=cpu_hist, cache_topo=cache_topo)
+
         for key, value in read_cpu_usage(cpuid_per_numa=cpuid_per_numa, hist=cpu_hist).items(): cpu_measures[key] = value
         libvirt_measures = dict()
         if VM_CONNECTOR != None: libvirt_measures = read_libvirt()
@@ -267,8 +348,8 @@ def output(rapl_measures : dict, cpu_measures : dict, libvirt_measures : dict, t
 ###########################################
 if __name__ == '__main__':
 
-    short_options = 'hledv:o:p:'
-    long_options = ['help', 'live', 'explicit', 'vm=', 'delay=', 'output=', 'precision=']
+    short_options = 'hlecdv:o:p:'
+    long_options = ['help', 'live', 'explicit', 'cache', 'vm=', 'delay=', 'output=', 'precision=']
 
     try:
         arguments, values = getopt.getopt(sys.argv[1:], short_options, long_options)
@@ -283,6 +364,8 @@ if __name__ == '__main__':
             LIVE_DISPLAY= True
         elif current_argument in('-e', '--explicit'):
             EXPLICIT_USAGE = True
+        elif current_argument in('-c', '--cache'):
+            PER_CACHE_USAGE = True
         elif current_argument in('-v', '--vm'):
             import libvirt 
             VM_CONNECTOR = libvirt.open(current_value)
@@ -298,6 +381,7 @@ if __name__ == '__main__':
         # Find sysfs
         rapl_sysfs=find_rapl_sysfs()
         cpuid_per_numa=find_cpuid_per_numa()
+        cache_topo=find_cache_topo()
         print('>RAPL domain found:')
         max_domain_length = len(max(list(rapl_sysfs.keys()), key=len))
         for domain, location in rapl_sysfs.items(): print(domain.ljust(max_domain_length), location)
@@ -307,7 +391,7 @@ if __name__ == '__main__':
         # Init output
         with open(OUTPUT_FILE, 'w') as f: f.write(OUTPUT_HEADER + OUTPUT_NL)
         # Launch
-        loop_read(rapl_sysfs=rapl_sysfs, cpuid_per_numa=cpuid_per_numa)
+        loop_read(rapl_sysfs=rapl_sysfs, cpuid_per_numa=cpuid_per_numa, cache_topo=cache_topo)
     except KeyboardInterrupt:
         print('Program interrupted')
         sys.exit(0)
